@@ -11,12 +11,114 @@ import ntpath
 from copy import deepcopy
 import timeit
 from skimage.feature import hog
+from joblib import Parallel, delayed
 
 
 class FacialDetector:
     def __init__(self, params:Parameters):
         self.params = params
         self.best_model = None
+
+    # def detect_on_pyramid(self, image, model, window_size, step_size, score_threshold, fixed_scales):
+    #     """
+    #     Detecteaza fete folosind redimensionari fixe ale imaginii.
+    #     :param image: Imaginea originala (in tonuri de gri).
+    #     :param model: Modelul antrenat (SVM).
+    #     :param window_size: Dimensiunea ferestrei glisante (lațime, înalțime).
+    #     :param step_size: Pasul ferestrei glisante.
+    #     :param score_threshold: Pragul de scor pentru a accepta o detectare.
+    #     :param fixed_scales: Lista de scale predefinite pentru redimensionarea imaginii.
+    #     :return: Lista de detectari si scoruri.
+    #     """
+    #     detections = []
+    #     scores = []
+    #     level = 0
+
+    #     for scale in fixed_scales:
+    #         resized_image = cv.resize(image, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
+    #         print(f"Processing scale {level} with image shape {resized_image.shape}...")
+
+    #         for y in range(0, resized_image.shape[0] - window_size[1] + 1, step_size):
+    #             for x in range(0, resized_image.shape[1] - window_size[0] + 1, step_size):
+    #                 patch = resized_image[y:y + window_size[1], x:x + window_size[0]]
+    #                 if patch.shape[:2] != window_size:
+    #                     continue
+
+    #                 # Extragem descriptorii HOG
+    #                 features = hog(patch,
+    #                                pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
+    #                                cells_per_block=(2, 2),
+    #                                feature_vector=True)
+
+    #                 # Prezicem scorul
+    #                 score = model.decision_function([features])[0]
+    #                 if score > score_threshold:
+    #                     x_orig = int(x / scale)
+    #                     y_orig = int(y / scale)
+    #                     w_orig = int(window_size[0] / scale)
+    #                     h_orig = int(window_size[1] / scale)
+    #                     detections.append((x_orig, y_orig, x_orig + w_orig, y_orig + h_orig))
+    #                     scores.append(score)
+
+    #         level += 1
+
+    #     return np.array(detections), np.array(scores)
+    def detect_on_pyramid(self, image, model, window_size, step_size, score_threshold, fixed_scales):
+        """
+        Detecteaza fete folosind redimensionari fixe ale imaginii, cu procesare paralela.
+        """
+
+
+        def process_window(x, y, resized_image, model, window_size, scale, dim_hog_cell):
+            patch = resized_image[y:y + window_size[1], x:x + window_size[0]]
+            if patch.shape[:2] != window_size:
+                return None  # Ignoram ferestrele incomplete
+
+            # Extragem descriptorii HOG
+            features = hog(
+                patch,
+                pixels_per_cell=(dim_hog_cell, dim_hog_cell),
+                cells_per_block=(2, 2),
+                feature_vector=True
+            )
+
+            # Prezicem scorul
+            score = model.decision_function([features])[0]
+            if score > 0:  # Consideram doar scoruri pozitive
+                x_orig = int(x / scale)
+                y_orig = int(y / scale)
+                w_orig = int(window_size[0] / scale)
+                h_orig = int(window_size[1] / scale)
+                return (x_orig, y_orig, x_orig + w_orig, y_orig + h_orig), score
+            return None
+
+        detections = []
+        scores = []
+        level = 0
+
+        for scale in fixed_scales:
+            resized_image = cv.resize(image, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
+            print(f"Processing scale {level} with image shape {resized_image.shape}...")
+
+            # Procesare paralela a ferestrelor glisante
+            results = Parallel(n_jobs=-1)(
+                delayed(process_window)(x, y, resized_image, model, window_size, scale, self.params.dim_hog_cell)
+                for y in range(0, resized_image.shape[0] - window_size[1] + 1, step_size)
+                for x in range(0, resized_image.shape[1] - window_size[0] + 1, step_size)
+            )
+
+            # Filtram rezultatele None si separam detectarile de scoruri
+            for result in results:
+                if result is not None:
+                    det, score = result
+                    if score > score_threshold:  # Aplicam pragul de scor
+                        detections.append(det)
+                        scores.append(score)
+
+            level += 1
+
+        return np.array(detections), np.array(scores)
+
 
     def get_positive_descriptors(self):
         # in aceasta functie calculam descriptorii pozitivi
@@ -82,9 +184,9 @@ class FacialDetector:
 
     def get_negative_descriptors(self):
         """
-        Calculăm descriptorii pentru imaginile negative deja salvate.
-        Returnăm un numpy array de dimensiuni N x D, unde:
-            N = numărul total de exemple negative
+        Calculam descriptorii pentru imaginile negative deja salvate.
+        Returnam un numpy array de dimensiuni N x D, unde:
+            N = numarul total de exemple negative
             D = dimensiunea unui descriptor HOG
         """
         images_path = os.path.join(self.params.dir_neg_examples, '*.jpg')
@@ -92,23 +194,23 @@ class FacialDetector:
         num_images = len(files)
         negative_descriptors = []
 
-        print(f"Calculăm descriptorii pentru {num_images} imagini negative...")
+        print(f"Calculam descriptorii pentru {num_images} imagini negative...")
 
         for i, file_path in enumerate(files):
-            print(f"Procesăm imaginea negativă numărul {i + 1}/{num_images} ({file_path})...")
+            print(f"Procesam imaginea negativa numarul {i + 1}/{num_images} ({file_path})...")
             img = cv.imread(file_path, cv.IMREAD_GRAYSCALE)
 
-            # Verificăm dimensiunea imaginii
+            # Verificam dimensiunea imaginii
             if img.shape[0] < self.params.dim_window or img.shape[1] < self.params.dim_window:
                 print(f"Imaginea {file_path} este prea mică pentru a calcula descriptorii (dimensiune: {img.shape}).")
                 continue
 
-            # Calculăm descriptorul HOG pentru întreaga imagine
+            # Calculam descriptorul HOG pentru intreaga imagine
             descr = hog(
                 img,
                 pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
                 cells_per_block=(2, 2),
-                feature_vector=True  # Calculăm un vector caracteristic unic pentru întreaga imagine
+                feature_vector=True  # Calculam un vector caracteristic unic pentru intreaga imagine
             )
 
             negative_descriptors.append(descr)
@@ -155,13 +257,16 @@ class FacialDetector:
 
 
         plt.plot(np.sort(positive_scores))
-        plt.plot(np.zeros(len(positive_scores)))
+        plt.plot(np.zeros(len(positive_scores)+len(negative_scores)))
+
         plt.plot(np.sort(negative_scores))
         plt.xlabel('Nr example antrenare')
         plt.ylabel('Scor clasificator')
         plt.title('Distributia scorurilor clasificatorului pe exemplele de antrenare')
         plt.legend(['Scoruri exemple pozitive', '0', 'Scoruri exemple negative'])
         plt.show()
+
+
 
     def intersection_over_union(self, bbox_a, bbox_b):
         x_a = max(bbox_a[0], bbox_b[0])
@@ -202,9 +307,9 @@ class FacialDetector:
         is_maximal = np.ones(len(image_detections)).astype(bool)
         iou_threshold = 0.3
         for i in range(len(sorted_image_detections) - 1):
-            if is_maximal[i] == True:  # don't change to 'is True' because is a numpy True and is not a python True :)
+            if is_maximal[i] == True:
                 for j in range(i + 1, len(sorted_image_detections)):
-                    if is_maximal[j] == True:  # don't change to 'is True' because is a numpy True and is not a python True :)
+                    if is_maximal[j] == True:
                         if self.intersection_over_union(sorted_image_detections[i],sorted_image_detections[j]) > iou_threshold:is_maximal[j] = False
                         else:  # verificam daca centrul detectiei este in mijlocul detectiei cu scor mai mare
                             c_x = (sorted_image_detections[j][0] + sorted_image_detections[j][2]) / 2
@@ -216,74 +321,68 @@ class FacialDetector:
 
     def run(self):
         """
-        Aceasta functie returneaza toate detectiile ( = ferestre) pentru toate imaginile din self.params.dir_test_examples
-        Directorul cu numele self.params.dir_test_examples contine imagini ce
-        pot sau nu contine fete. Aceasta functie ar trebui sa detecteze fete atat pe setul de
-        date MIT+CMU dar si pentru alte imagini
-        Functia 'non_maximal_suppression' suprimeaza detectii care se suprapun (protocolul de evaluare considera o detectie duplicata ca fiind falsa)
-        Suprimarea non-maximelor se realizeaza pe pentru fiecare imagine.
-        :return:
-        detections: numpy array de dimensiune NX4, unde N este numarul de detectii pentru toate imaginile.
-        detections[i, :] = [x_min, y_min, x_max, y_max]
-        scores: numpy array de dimensiune N, scorurile pentru toate detectiile pentru toate imaginile.
-        file_names: numpy array de dimensiune N, pentru fiecare detectie trebuie sa salvam numele imaginii.
-        (doar numele, nu toata calea).
+        Rulare detecție pe toate imaginile de test folosind o piramida de scale, cu suprimare a suprapunerilor.
         """
-
         test_images_path = os.path.join(self.params.dir_test_examples, '*.jpg')
         test_files = glob.glob(test_images_path)
-        detections = None  # array cu toate detectiile pe care le obtinem
-        scores = np.array([])  # array cu toate scorurile pe care le obtinem
-        file_names = np.array([])  # array cu fisiele, in aceasta lista fisierele vor aparea de mai multe ori, pentru fiecare
-        # detectie din imagine, numele imaginii va aparea in aceasta lista
-        w = self.best_model.coef_.T
-        bias = self.best_model.intercept_[0]
-        num_test_images = len(test_files)
-        descriptors_to_return = []
-        
-        for i in range(num_test_images):
-            start_time = timeit.default_timer()
-            print('Procesam imaginea de testare %d/%d..' % (i, num_test_images))
-            img = cv.imread(test_files[i], cv.IMREAD_GRAYSCALE)
-            # TODO: completati codul functiei in continuare
-            image_scores = []
-            image_detections = []
-            hog_descriptors = hog(img, pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
-                                  cells_per_block=(2, 2), feature_vector=False)
-            num_cols = img.shape[1] // self.params.dim_hog_cell - 1
-            num_rows = img.shape[0] // self.params.dim_hog_cell - 1
-            num_cell_in_template = self.params.dim_window // self.params.dim_hog_cell - 1
+        all_detections = []
+        all_scores = []
+        all_file_names = []
 
-            for y in range(0, num_rows - num_cell_in_template):
-                for x in range(0, num_cols - num_cell_in_template):
-                    descr = hog_descriptors[y:y + num_cell_in_template, x:x + num_cell_in_template].flatten()
-                    score = np.dot(descr, w)[0] + bias
-                    if score > self.params.threshold:
-                        x_min = int(x * self.params.dim_hog_cell)
-                        y_min = int(y * self.params.dim_hog_cell)
-                        x_max = int(x * self.params.dim_hog_cell + self.params.dim_window)
-                        y_max = int(y * self.params.dim_hog_cell + self.params.dim_window)
-                        image_detections.append([x_min, y_min, x_max, y_max])
-                        image_scores.append(score)
-            if len(image_scores) > 0:
-                image_detections, image_scores = self.non_maximal_suppression(np.array(image_detections),
-                                                                              np.array(image_scores), img.shape)
-            if len(image_scores) > 0:
-                print('Am gasit %d detectii' % len(image_scores))
-                if detections is None:
-                    detections = image_detections
-                else:
-                    detections = np.concatenate((detections, image_detections))
-                scores = np.append(scores, image_scores)
-                short_name = ntpath.basename(test_files[i])
-                image_names = [short_name for ww in range(len(image_scores))]
-                file_names = np.append(file_names, image_names)
+        print(f'Processing {len(test_files)} test images...')
 
-            end_time = timeit.default_timer()
-            print('Timpul de procesarea al imaginii de testare %d/%d este %f sec.'
-                  % (i, num_test_images, end_time - start_time))
+        total_detections = 0  # Contor pentru toate detectarile
 
-        return detections, scores, file_names
+        for i, test_file in enumerate(test_files):
+            img = cv.imread(test_file, cv.IMREAD_GRAYSCALE)
+            print(f'Processing image {i + 1}/{len(test_files)}: {test_file}')
+            # fixed_scales = [1.0, 0.7, 0.3, 0.1]
+            fixed_scales = [1.0, 0.8, 0.6, 0.4, 0.2, 0.05]  # Scale fixe
+            detections, scores = self.detect_on_pyramid(
+                image=img,
+                model=self.best_model,
+                window_size=(self.params.dim_window, self.params.dim_window),
+                step_size=self.params.dim_hog_cell,
+                score_threshold=self.params.threshold,
+                fixed_scales=fixed_scales
+            )
+
+            print(f'Found {len(detections)} detections in image {test_file}')
+
+            # Aplicam suprimarea non-maximala pentru aceasta imagine
+            if len(detections) > 0:
+                detections, scores = self.non_maximal_suppression(
+                    np.array(detections),
+                    np.array(scores),
+                    img.shape
+                )
+
+            print(f'After NMS: {len(detections)} detections remain.')
+
+            total_detections += len(detections)
+
+            # Adăugam detectarile si scorurile
+            all_detections.extend(detections)
+            all_scores.extend(scores)
+            all_file_names.extend([os.path.basename(test_file)] * len(detections))
+
+        print(f'Total detections across all images after NMS: {total_detections}')
+
+        # Salveaza rezultatele în fișierele specificate
+        detections_file = os.path.join(self.params.dir_save_solution, "detections_all_faces.npy")
+
+        scores_file = os.path.join(self.params.dir_save_solution, "scores_all_faces.npy")
+
+        file_names_file = os.path.join(self.params.dir_save_solution, "file_names_all_faces.npy")
+
+        np.save(detections_file, all_detections)
+        np.save(scores_file, all_scores)
+        np.save(file_names_file, all_file_names)
+
+        print(f"Saved detections to {detections_file}")
+        print(f"Saved scores to {scores_file}")
+        print(f"Saved file names to {file_names_file}")
+        return np.array(all_detections), np.array(all_scores), np.array(all_file_names)
 
     def compute_average_precision(self, rec, prec):
         # functie adaptata din 2010 Pascal VOC development kit
@@ -299,8 +398,8 @@ class FacialDetector:
     def eval_detections(self, detections, scores, file_names):
         if detections is None:
             print("Eroare: detections este None!")
-            return  # Sau poți să arunci o excepție, depinde de context
-    
+            return  # Sau poti sa arunci o excepție, depinde de context
+
         ground_truth_file = np.loadtxt(self.params.path_annotations, dtype='str')
         ground_truth_file_names = np.array(ground_truth_file[:, 0])
         ground_truth_detections = np.array(ground_truth_file[:, 1:], np.int32)

@@ -5,17 +5,19 @@ from Visualize import *
 
 
 params: Parameters = Parameters()
-params.dim_window = 50  # exemplele pozitive (fete de oameni cropate) au 36x36 pixeli
-params.dim_hog_cell = 8  # dimensiunea celulei
+params.dim_window = 100  # exemplele pozitive (fete de oameni cropate) au 36x36 pixeli
+params.dim_hog_cell = 8 # dimensiunea celulei - Pentru HOG 9 -> 0.483 si imgpoz91 + poze_negative91/square
+# img 100X100 cu dim window 100 si hog cell 8 -> 0.498 so tresh 2.5
+
 params.overlap = 0.3
-params.number_positive_examples = 2666  # numarul exemplelor pozitive
-params.number_negative_examples = 9304  # numarul exemplelor negative
+params.number_positive_examples = 5813  # numarul exemplelor pozitive
+params.number_negative_examples = 23357  # numarul exemplelor negative imgneg91 -> 53770
 
 params.threshold = 2.5 # toate ferestrele cu scorul > threshold si maxime locale devin detectii
 params.has_annotations = True
 
 params.use_hard_mining = False  # (optional)antrenare cu exemple puternic negative
-params.use_flip_images = True  # adauga imaginile cu fete oglindite
+params.use_flip_images = False  # adauga imaginile cu fete oglindite
 
 if params.use_flip_images:
     params.number_positive_examples *= 2
@@ -27,6 +29,7 @@ facial_detector: FacialDetector = FacialDetector(params)
 positive_features_path = os.path.join(params.dir_save_files, 'descriptoriExemplePozitive_' + str(params.dim_hog_cell) + '_' +
                         str(params.number_positive_examples) + '.npy')
 if os.path.exists(positive_features_path):
+
     positive_features = np.load(positive_features_path)
     print('Am incarcat descriptorii pentru exemplele pozitive')
 else:

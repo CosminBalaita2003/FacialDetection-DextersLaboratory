@@ -32,7 +32,7 @@ def compute_average_precision(rec, prec):
 def eval_detections(detections, scores, file_names, ground_truth_path):
     ground_truth_file = np.loadtxt(ground_truth_path, dtype='str')
     ground_truth_file_names = np.array(ground_truth_file[:, 0])
-    ground_truth_detections = np.array(ground_truth_file[:, 1:], np.int)
+    ground_truth_detections = np.array(ground_truth_file[:, 1:], np.int32)
 
     num_gt_detections = len(ground_truth_detections)  # numar total de adevarat pozitive
     gt_exists_detection = np.zeros(num_gt_detections)
@@ -170,27 +170,27 @@ def evaluate_results_task2(solution_path,ground_truth_path,character, verbose = 
 verbose = 0
 
 #change this on your machine
-solution_path_root = "../fisiere_solutie/331_Alexe_Bogdan/"
+solution_path_root = "../fisiere_solutie/341_Balaita_Cosmin/"
 ground_truth_path_root = "../../validare/"
 
 #task1
 solution_path = solution_path_root + "task1/"
-ground_truth_path = ground_truth_path_root + "task1_gt_validare20.txt"
+ground_truth_path = ground_truth_path_root + "task1_gt_validare.txt"
 evaluate_results_task1(solution_path, ground_truth_path, verbose)
 
 
-#task2
-solution_path = solution_path_root + "task2/"
-
-
-ground_truth_path = ground_truth_path_root + "task2_dad_gt_validare20.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "dad", verbose)
-
-ground_truth_path = ground_truth_path_root + "task2_mom_gt_validare20.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "mom", verbose)
-
-ground_truth_path = ground_truth_path_root + "task2_dexter_gt_validare20.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "dexter", verbose)
-
-ground_truth_path = ground_truth_path_root + "task2_deedee_gt_validare20.txt"
-evaluate_results_task2(solution_path, ground_truth_path, "deedee", verbose)
+# #task2
+# solution_path = solution_path_root + "task2/"
+#
+#
+# ground_truth_path = ground_truth_path_root + "task2_dad_gt_validare20.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "dad", verbose)
+#
+# ground_truth_path = ground_truth_path_root + "task2_mom_gt_validare20.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "mom", verbose)
+#
+# ground_truth_path = ground_truth_path_root + "task2_dexter_gt_validare20.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "dexter", verbose)
+#
+# ground_truth_path = ground_truth_path_root + "task2_deedee_gt_validare20.txt"
+# evaluate_results_task2(solution_path, ground_truth_path, "deedee", verbose)
